@@ -56,11 +56,37 @@ export async function exportSignedPdf({
       const drawW = area.w * pageWidth
       const drawH = area.h * pageHeight
       const drawY = pageHeight - (area.y + area.h) * pageHeight
+
+      // Preserve the PNG's natural aspect ratio (the user signed in a
+      // landscape modal whose canvas is typically very wide; the signature
+      // box on the PDF may have a different aspect ratio). The preview uses
+      // CSS `object-contain`, which letterboxes to preserve aspect — we
+      // mirror that here so the exported PDF matches what the user saw.
+      const pngAspect = png.width / png.height
+      const boxAspect = drawW / drawH
+      let actualW: number
+      let actualH: number
+      let actualX: number
+      let actualY: number
+      if (pngAspect > boxAspect) {
+        // PNG is wider than the box → fit by width, center vertically.
+        actualW = drawW
+        actualH = drawW / pngAspect
+        actualX = drawX
+        actualY = drawY + (drawH - actualH) / 2
+      } else {
+        // PNG is narrower than the box → fit by height, center horizontally.
+        actualH = drawH
+        actualW = drawH * pngAspect
+        actualY = drawY
+        actualX = drawX + (drawW - actualW) / 2
+      }
+
       page.drawImage(png, {
-        x: drawX,
-        y: drawY,
-        width: drawW,
-        height: drawH,
+        x: actualX,
+        y: actualY,
+        width: actualW,
+        height: actualH,
       })
     }
   }
