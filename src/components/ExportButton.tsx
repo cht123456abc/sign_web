@@ -1,24 +1,33 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { deriveExportFilename, downloadBlob, exportSignedPdf } from '../utils/pdfExport'
 
 export function ExportButton() {
-  const { pdfFile, signatureArea, signatureImage, showToast } = useApp()
+  const { pdfFile, signatureAreas, showToast } = useApp()
   const [busy, setBusy] = useState(false)
 
-  const disabled = !pdfFile || !signatureArea || !signatureImage || busy
+  // Export is only enabled if there's at least one signed area.
+  const signedAreas = useMemo(
+    () => signatureAreas.filter((a) => a.signatureImage),
+    [signatureAreas]
+  )
+  const disabled = !pdfFile || signedAreas.length === 0 || busy
 
   const onExport = async () => {
-    if (!pdfFile || !signatureArea || !signatureImage) return
+    if (!pdfFile || signedAreas.length === 0) return
     setBusy(true)
     try {
       const blob = await exportSignedPdf({
         pdfFile,
-        signatureArea,
-        signatureImagePng: signatureImage,
+        signedAreas,
       })
       downloadBlob(blob, deriveExportFilename(pdfFile.name))
-      showToast('已导出签名后的 PDF', 'success')
+      showToast(
+        signedAreas.length === 1
+          ? '已导出签名后的 PDF'
+          : `已导出 PDF（共 ${signedAreas.length} 个签名区）`,
+        'success'
+      )
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '导出失败'
       showToast(`导出失败: ${msg}`, 'error')

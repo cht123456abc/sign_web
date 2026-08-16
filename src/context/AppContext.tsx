@@ -7,7 +7,12 @@ import {
   type ReactNode,
 } from 'react'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
-import type { AppState, SignatureArea, ToastMessage } from '../types'
+import type {
+  AppState,
+  NewSignatureArea,
+  SignatureArea,
+  ToastMessage,
+} from '../types'
 
 const TOAST_DURATION_MS = 3000
 
@@ -16,14 +21,14 @@ interface AppContextValue extends AppState {
   setPdfDoc: (doc: PDFDocumentProxy | null, numPages: number) => void
   setCurrentPage: (page: number) => void
 
-  setSignatureArea: (area: SignatureArea | null) => void
-  setIsAreaSelected: (selected: boolean) => void
-  updateSignatureArea: (patch: Partial<SignatureArea>) => void
-  clearSignatureArea: () => void
+  /** Create a new area; returns the assigned id. */
+  addSignatureArea: (area: NewSignatureArea) => string
+  updateSignatureArea: (id: string, patch: Partial<Omit<SignatureArea, 'id'>>) => void
+  deleteSignatureArea: (id: string) => void
+  selectArea: (id: string | null) => void
+  setAreaSignatureImage: (id: string, dataUrl: string | null) => void
 
-  setSignatureImage: (dataUrl: string | null) => void
-
-  openSignatureModal: () => void
+  openSignatureModal: (areaId: string) => void
   closeSignatureModal: () => void
 
   showToast: (text: string, kind?: ToastMessage['kind']) => void
@@ -38,14 +43,22 @@ const initialState: AppState = {
   numPages: 0,
   currentPage: 1,
 
-  signatureArea: null,
-  isAreaSelected: false,
-
-  signatureImage: null,
+  signatureAreas: [],
+  selectedAreaId: null,
 
   signatureModalOpen: false,
+  signingAreaId: null,
 
   toast: null,
+}
+
+/** Generate a stable id for a new area. crypto.randomUUID is available in
+ *  modern browsers and modern Node; fall back if needed. */
+function newId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID()
+  }
+  return `a-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -56,9 +69,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...s,
       pdfFile: file,
       // Reset downstream state when a new PDF is uploaded.
-      signatureArea: null,
-      isAreaSelected: false,
-      signatureImage: null,
+      signatureAreas: [],
+      selectedAreaId: null,
+      signingAreaId: null,
+      signatureModalOpen: false,
     }))
   }, [])
 
@@ -70,40 +84,71 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, currentPage: page }))
   }, [])
 
-  const setSignatureArea = useCallback((area: SignatureArea | null) => {
-    setState((s) => ({ ...s, signatureArea: area }))
-  }, [])
-
-  const setIsAreaSelected = useCallback((selected: boolean) => {
-    setState((s) => ({ ...s, isAreaSelected: selected }))
-  }, [])
-
-  const updateSignatureArea = useCallback((patch: Partial<SignatureArea>) => {
-    setState((s) => {
-      if (!s.signatureArea) return s
-      return { ...s, signatureArea: { ...s.signatureArea, ...patch } }
-    })
-  }, [])
-
-  const clearSignatureArea = useCallback(() => {
+  const addSignatureArea = useCallback((area: NewSignatureArea): string => {
+    const id = newId()
     setState((s) => ({
       ...s,
-      signatureArea: null,
-      isAreaSelected: false,
-      signatureImage: null,
+      signatureAreas: [
+        ...s.signatureAreas,
+        { id, signatureImage: null, ...area },
+      ],
+      selectedAreaId: id,
+    }))
+    return id
+  }, [])
+
+  const updateSignatureArea = useCallback(
+    (id: string, patch: Partial<Omit<SignatureArea, 'id'>>) => {
+      setState((s) => ({
+        ...s,
+        signatureAreas: s.signatureAreas.map((a) =>
+          a.id === id ? { ...a, ...patch } : a
+        ),
+      }))
+    },
+    []
+  )
+
+  const deleteSignatureArea = useCallback((id: string) => {
+    setState((s) => ({
+      ...s,
+      signatureAreas: s.signatureAreas.filter((a) => a.id !== id),
+      selectedAreaId: s.selectedAreaId === id ? null : s.selectedAreaId,
+      signingAreaId: s.signingAreaId === id ? null : s.signingAreaId,
+      signatureModalOpen: s.signingAreaId === id ? false : s.signatureModalOpen,
     }))
   }, [])
 
-  const setSignatureImage = useCallback((dataUrl: string | null) => {
-    setState((s) => ({ ...s, signatureImage: dataUrl }))
+  const selectArea = useCallback((id: string | null) => {
+    setState((s) => ({ ...s, selectedAreaId: id }))
   }, [])
 
-  const openSignatureModal = useCallback(() => {
-    setState((s) => ({ ...s, signatureModalOpen: true }))
+  const setAreaSignatureImage = useCallback(
+    (id: string, dataUrl: string | null) => {
+      setState((s) => ({
+        ...s,
+        signatureAreas: s.signatureAreas.map((a) =>
+          a.id === id ? { ...a, signatureImage: dataUrl } : a
+        ),
+      }))
+    },
+    []
+  )
+
+  const openSignatureModal = useCallback((areaId: string) => {
+    setState((s) => ({
+      ...s,
+      signatureModalOpen: true,
+      signingAreaId: areaId,
+    }))
   }, [])
 
   const closeSignatureModal = useCallback(() => {
-    setState((s) => ({ ...s, signatureModalOpen: false }))
+    setState((s) => ({
+      ...s,
+      signatureModalOpen: false,
+      signingAreaId: null,
+    }))
   }, [])
 
   const showToast = useCallback((text: string, kind: ToastMessage['kind'] = 'info') => {
@@ -124,11 +169,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setPdfFile,
       setPdfDoc,
       setCurrentPage,
-      setSignatureArea,
-      setIsAreaSelected,
+      addSignatureArea,
       updateSignatureArea,
-      clearSignatureArea,
-      setSignatureImage,
+      deleteSignatureArea,
+      selectArea,
+      setAreaSignatureImage,
       openSignatureModal,
       closeSignatureModal,
       showToast,
@@ -139,11 +184,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setPdfFile,
       setPdfDoc,
       setCurrentPage,
-      setSignatureArea,
-      setIsAreaSelected,
+      addSignatureArea,
       updateSignatureArea,
-      clearSignatureArea,
-      setSignatureImage,
+      deleteSignatureArea,
+      selectArea,
+      setAreaSignatureImage,
       openSignatureModal,
       closeSignatureModal,
       showToast,

@@ -10,9 +10,10 @@ export function PdfViewer() {
   const {
     pdfDoc,
     currentPage,
-    signatureArea,
-    setSignatureArea,
-    setIsAreaSelected,
+    signatureAreas,
+    addSignatureArea,
+    selectedAreaId,
+    selectArea,
     showToast,
   } = useApp()
 
@@ -78,16 +79,17 @@ export function PdfViewer() {
     canvasRef,
   })
 
-  const hasAreaOnThisPage = signatureArea && signatureArea.page === currentPage
+  // All signature areas on the current page, rendered in declaration order.
+  const areasOnPage = signatureAreas.filter((a) => a.page === currentPage)
 
+  // Drag-to-create stays enabled whenever createMode is on, regardless of how
+  // many areas already exist — that's the whole point of multi-area support.
   const { preview } = useDragCreate({
-    enabled: Boolean(pdfDoc) && !error && createMode && !hasAreaOnThisPage,
+    enabled: Boolean(pdfDoc) && !error && createMode,
     containerRef: containerRef as React.RefObject<HTMLElement>,
     currentPage,
-    existingArea: hasAreaOnThisPage ? signatureArea : null,
     onCreated: (area) => {
-      setSignatureArea(area)
-      setIsAreaSelected(true)
+      addSignatureArea(area)
       setCreateMode(false)
     },
   })
@@ -98,7 +100,8 @@ export function PdfViewer() {
 
   useEffect(() => {
     setCreateMode(false)
-  }, [currentPage])
+    selectArea(null)
+  }, [currentPage, selectArea])
 
   useEffect(() => {
     if (!createMode) return
@@ -111,12 +114,12 @@ export function PdfViewer() {
 
   const onContainerPointerDown = (e: React.PointerEvent) => {
     const target = e.target as HTMLElement | null
-    // Don't deselect when clicking on the signature area itself or its toolbar —
+    // Don't deselect when clicking on a signature area itself or its toolbar —
     // deselecting here would unmount the toolbar before the button's click
     // event can fire.
     if (target?.closest('[data-signature-area="true"]')) return
     if (target?.closest('[data-signature-toolbar="true"]')) return
-    if (signatureArea) setIsAreaSelected(false)
+    if (selectedAreaId) selectArea(null)
   }
 
   return (
@@ -162,9 +165,11 @@ export function PdfViewer() {
             />
           )}
 
-          {hasAreaOnThisPage && pageSize && (
-            <SignatureArea area={signatureArea} containerSize={pageSize} />
-          )}
+          {/* Render every signature area that lives on this page. */}
+          {pageSize &&
+            areasOnPage.map((area) => (
+              <SignatureArea key={area.id} area={area} containerSize={pageSize} />
+            ))}
 
           {loading && (
             <div className="absolute inset-0 flex items-center justify-center bg-white/60 text-sm text-gray-500">
@@ -174,21 +179,22 @@ export function PdfViewer() {
         </div>
       </div>
 
-      {!hasAreaOnThisPage && (
-        <div className="pointer-events-none sticky bottom-4 z-10 flex justify-center">
-          <button
-            type="button"
-            onClick={() => setCreateMode((v) => !v)}
-            className={`pointer-events-auto rounded-full px-5 py-2.5 text-sm font-medium shadow-lg transition active:scale-95 ${
-              createMode
-                ? 'bg-gray-700 text-white hover:bg-gray-800'
-                : 'bg-primary-600 text-white hover:bg-primary-700'
-            }`}
-          >
-            {createMode ? '取消创建' : '+ 添加签名区'}
-          </button>
-        </div>
-      )}
+      {/* "+ Add area" stays available even when areas already exist on this
+          page — multi-area support is the whole point. Hide only during the
+          active drag. */}
+      <div className="pointer-events-none sticky bottom-4 z-10 flex justify-center">
+        <button
+          type="button"
+          onClick={() => setCreateMode((v) => !v)}
+          className={`pointer-events-auto rounded-full px-5 py-2.5 text-sm font-medium shadow-lg transition active:scale-95 ${
+            createMode
+              ? 'bg-gray-700 text-white hover:bg-gray-800'
+              : 'bg-primary-600 text-white hover:bg-primary-700'
+          }`}
+        >
+          {createMode ? '取消创建' : '+ 添加签名区'}
+        </button>
+      </div>
     </div>
   )
 }

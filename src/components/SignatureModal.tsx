@@ -20,8 +20,13 @@ const PEN_WIDTHS = [
 ] as const
 
 export function SignatureModal() {
-  const { signatureModalOpen, closeSignatureModal, setSignatureImage, showToast } =
-    useApp()
+  const {
+    signatureModalOpen,
+    closeSignatureModal,
+    signingAreaId,
+    setAreaSignatureImage,
+    showToast,
+  } = useApp()
   const { lockLandscape, unlock } = useOrientation()
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -231,13 +236,14 @@ export function SignatureModal() {
   const onConfirm = async () => {
     const canvas = canvasRef.current
     if (!canvas) return
+    if (!signingAreaId) return
     if (isCanvasBlank(canvas)) {
       showToast('请先签名', 'error')
       return
     }
     try {
       const dataUrl = await canvasToPngDataUrl(canvas)
-      setSignatureImage(dataUrl)
+      setAreaSignatureImage(signingAreaId, dataUrl)
       onClose()
     } catch (e) {
       const msg = e instanceof Error ? e.message : '签名保存失败'

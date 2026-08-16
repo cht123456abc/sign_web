@@ -3,47 +3,67 @@ import type { SignatureArea } from '../types'
 
 export interface ExportOptions {
   pdfFile: File
-  signatureArea: SignatureArea
-  signatureImagePng: string
+  /** Areas that have a non-null signatureImage. Areas without a signature
+   *  are skipped — they shouldn't be embedded as empty boxes. */
+  signedAreas: SignatureArea[]
 }
 
 /**
- * Loads the original PDF, draws the signature image onto the signature area's page,
- * and returns a new PDF blob. The original PDF file is never modified.
+ * Loads the original PDF, draws every signed area's signature image onto its
+ * respective page, and returns a new PDF blob. The original PDF file is never
+ * modified.
  *
  * Coordinate conventions:
- *   - signatureArea stores browser-space ratios (origin top-left)
+ *   - SignatureArea stores browser-space ratios (origin top-left)
  *   - PDF user space uses origin bottom-left
  *   - We convert at draw time.
  */
 export async function exportSignedPdf({
   pdfFile,
-  signatureArea,
-  signatureImagePng,
+  signedAreas,
 }: ExportOptions): Promise<Blob> {
   const arrayBuffer = await pdfFile.arrayBuffer()
   const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true })
 
-  // pdf-lib expects the raw base64 portion only (no data:image/png;base64, prefix).
-  const base64 = signatureImagePng.split(',')[1] ?? signatureImagePng
-  const pngImage = await pdfDoc.embedPng(base64)
+  // Group areas by page so we only do page.getSize() once per page.
+  const byPage = new Map<number, SignatureArea[]>()
+  for (const area of signedAreas) {
+    if (!area.signatureImage) continue
+    const list = byPage.get(area.page) ?? []
+    list.push(area)
+    byPage.set(area.page, list)
+  }
 
-  const pageIndex = signatureArea.page - 1
-  const page = pdfDoc.getPage(pageIndex)
-  const { width: pageWidth, height: pageHeight } = page.getSize()
+  // Embed each unique signature once (the same dataURL can appear on multiple
+  // areas — e.g. user signed one box then copied it via "重新签名" elsewhere).
+  const embeddedCache = new Map<string, Awaited<ReturnType<typeof pdfDoc.embedPng>>>()
+  for (const area of signedAreas) {
+    if (!area.signatureImage || embeddedCache.has(area.signatureImage)) continue
+    // pdf-lib expects the raw base64 portion only (no data:image/png;base64, prefix).
+    const base64 = area.signatureImage.split(',')[1] ?? area.signatureImage
+    const png = await pdfDoc.embedPng(base64)
+    embeddedCache.set(area.signatureImage, png)
+  }
 
-  // Browser → PDF coordinate conversion (origin flip).
-  const drawX = signatureArea.x * pageWidth
-  const drawW = signatureArea.w * pageWidth
-  const drawH = signatureArea.h * pageHeight
-  const drawY = pageHeight - (signatureArea.y + signatureArea.h) * pageHeight
-
-  page.drawImage(pngImage, {
-    x: drawX,
-    y: drawY,
-    width: drawW,
-    height: drawH,
-  })
+  // Draw onto each page.
+  for (const [pageNumber, areas] of byPage.entries()) {
+    const page = pdfDoc.getPage(pageNumber - 1)
+    const { width: pageWidth, height: pageHeight } = page.getSize()
+    for (const area of areas) {
+      const png = embeddedCache.get(area.signatureImage!)!
+      // Browser → PDF coordinate conversion (origin flip).
+      const drawX = area.x * pageWidth
+      const drawW = area.w * pageWidth
+      const drawH = area.h * pageHeight
+      const drawY = pageHeight - (area.y + area.h) * pageHeight
+      page.drawImage(png, {
+        x: drawX,
+        y: drawY,
+        width: drawW,
+        height: drawH,
+      })
+    }
+  }
 
   const bytes = await pdfDoc.save()
   // Copy into a plain ArrayBuffer so the Blob constructor accepts it across TS targets.

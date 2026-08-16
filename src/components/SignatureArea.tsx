@@ -28,15 +28,14 @@ const TOOLBAR_OFFSET_PX = 44 // distance from signature area top to toolbar bott
 export function SignatureArea({ area, containerSize }: Props) {
   const {
     updateSignatureArea,
-    clearSignatureArea,
-    setIsAreaSelected,
-    isAreaSelected,
+    deleteSignatureArea,
+    selectArea,
+    selectedAreaId,
     openSignatureModal,
-    signatureImage,
-    currentPage,
   } = useApp()
 
-  const hasSignature = Boolean(signatureImage) && area.page === currentPage
+  const isAreaSelected = selectedAreaId === area.id
+  const hasSignature = Boolean(area.signatureImage)
 
   const dragRef = useRef<DragState | null>(null)
   const [, forceUpdate] = useState(0)
@@ -65,9 +64,9 @@ export function SignatureArea({ area, containerSize }: Props) {
         containerRect: rect,
       }
       ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-      setIsAreaSelected(true)
+      selectArea(area.id)
     },
-    [area, setIsAreaSelected]
+    [area, selectArea]
   )
 
   const onMove = useCallback(
@@ -117,10 +116,15 @@ export function SignatureArea({ area, containerSize }: Props) {
           break
       }
 
-      updateSignatureArea(next)
+      updateSignatureArea(area.id, {
+        x: next.x,
+        y: next.y,
+        w: next.w,
+        h: next.h,
+      })
       forceUpdate((n) => n + 1)
     },
-    [updateSignatureArea]
+    [area.id, updateSignatureArea]
   )
 
   const endDrag = useCallback((e: React.PointerEvent) => {
@@ -137,27 +141,26 @@ export function SignatureArea({ area, containerSize }: Props) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         dragRef.current = null
-        setIsAreaSelected(false)
+        selectArea(null)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [setIsAreaSelected])
+  }, [selectArea])
 
   const handleAreaPointerDown = (e: React.PointerEvent) => {
     if ((e.target as HTMLElement).dataset.handle) return
     beginDrag(e, 'move')
-    setIsAreaSelected(true)
   }
 
   const handleSignClick = (e: React.MouseEvent) => {
     e.stopPropagation()
-    openSignatureModal()
+    openSignatureModal(area.id)
   }
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation()
-    clearSignatureArea()
+    deleteSignatureArea(area.id)
   }
 
   const handleBase =
@@ -168,6 +171,7 @@ export function SignatureArea({ area, containerSize }: Props) {
       {/* The signature area itself. */}
       <div
         data-signature-area="true"
+        data-area-id={area.id}
         className={`absolute touch-none ${
           isAreaSelected
             ? 'ring-[1.5px] ring-primary-500'
@@ -189,9 +193,9 @@ export function SignatureArea({ area, containerSize }: Props) {
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
       >
-        {hasSignature && signatureImage ? (
+        {hasSignature && area.signatureImage ? (
           <img
-            src={signatureImage}
+            src={area.signatureImage}
             alt="签名"
             className="pointer-events-none h-full w-full object-contain"
             draggable={false}
@@ -200,7 +204,7 @@ export function SignatureArea({ area, containerSize }: Props) {
 
         {isAreaSelected && (
           <>
-            {/* Resize handles — only the 4 corners, kept small (8px) and
+            {/* Resize handles — only the 4 corners, kept small (6px) and
                 positioned fully outside the area so the area body stays a
                 clean drag-to-move surface. Edge handles were removed: they
                 ran along the entire side and made it too easy to resize
@@ -237,6 +241,7 @@ export function SignatureArea({ area, containerSize }: Props) {
       {isAreaSelected && (
         <div
           data-signature-toolbar="true"
+          data-area-id={area.id}
           className="pointer-events-none absolute z-20 flex flex-row flex-nowrap items-center gap-1 whitespace-nowrap rounded-md bg-white/95 px-1 py-1 shadow ring-1 ring-gray-200 backdrop-blur"
           style={{
             left: pxX + pxW / 2,

@@ -1,15 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { SignatureArea } from '../types'
+import type { NewSignatureArea } from '../types'
 
 interface UseDragCreateArgs {
   enabled: boolean
   containerRef: React.RefObject<HTMLElement>
   currentPage: number
   minSize?: number // minimum width/height in CSS pixels
-  /** Existing area on this page; if set, the hook will not start a new drag. */
-  existingArea: SignatureArea | null
-  onCreated: (area: SignatureArea) => void
-  onSelectExisting?: () => void
+  onCreated: (area: NewSignatureArea) => void
 }
 
 interface DragPreview {
@@ -32,7 +29,6 @@ export function useDragCreate({
   containerRef,
   currentPage,
   minSize = DEFAULT_MIN_SIZE,
-  existingArea,
   onCreated,
 }: UseDragCreateArgs) {
   const [preview, setPreview] = useState<DragPreview | null>(null)
@@ -42,7 +38,7 @@ export function useDragCreate({
     (e: PointerEvent) => {
       if (!enabled) return
       const target = e.target as HTMLElement | null
-      // Ignore drags that start on the signature area overlay itself
+      // Ignore drags that start on a signature area overlay itself
       // (those are handled by SignatureArea), or on its floating toolbar.
       if (
         target?.closest('[data-signature-area="true"]') ||
@@ -115,7 +111,7 @@ export function useDragCreate({
 
       const cssW = rect.width
       const cssH = rect.height
-      const area: SignatureArea = {
+      const area: NewSignatureArea = {
         page: currentPage,
         x: p.x / cssW,
         y: p.y / cssH,
@@ -151,13 +147,8 @@ export function useDragCreate({
     }
   }, [containerRef, onPointerDown, onPointerMove, onPointerUp])
 
-  // Allow callers to disable drag-create without remounting.
-  // If an area already exists on the current page, disable creation.
-  const effectiveEnabled =
-    enabled && !(existingArea && existingArea.page === currentPage)
-
   return {
     preview,
-    enabled: effectiveEnabled,
+    enabled,
   }
 }
