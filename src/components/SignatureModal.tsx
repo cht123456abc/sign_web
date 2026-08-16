@@ -11,13 +11,9 @@ interface Stroke {
 
 const PEN_COLOR = '#1a1a1a'
 
-const PEN_WIDTHS = [
-  { value: 2 },
-  { value: 4 },
-  { value: 7 },
-  { value: 11 },
-  { value: 16 },
-] as const
+const PEN_WIDTH_MIN = 5
+const PEN_WIDTH_MAX = 11
+const PEN_WIDTH_STEP = 1
 
 export function SignatureModal() {
   const {
@@ -31,7 +27,7 @@ export function SignatureModal() {
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [strokes, setStrokes] = useState<Stroke[]>([])
-  const [penWidth, setPenWidth] = useState<number>(4) // default medium
+  const [penWidth, setPenWidth] = useState<number>(7) // default = 3rd level
   const drawingRef = useRef<Stroke | null>(null)
   const dprRef = useRef(1)
 
@@ -294,32 +290,30 @@ export function SignatureModal() {
         className="flex shrink-0 items-center justify-between gap-3 border-t border-gray-200 bg-white px-4 pt-2"
         style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 0.5rem)' }}
       >
-        {/* Pen width selector — buttons show a black dot whose size scales with
-            the actual stroke width (clamped to a 3px minimum so the smallest
-            option is still visible). */}
-        <div className="flex items-center gap-1 rounded-md border border-gray-300 bg-white p-1">
-          {PEN_WIDTHS.map((opt) => {
-            const active = penWidth === opt.value
-            const dotSize = Math.max(opt.value, 3)
-            return (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => setPenWidth(opt.value)}
-                aria-pressed={active}
-                aria-label={`${opt.value} 像素`}
-                title={`${opt.value}px`}
-                className={`flex h-9 w-9 items-center justify-center rounded transition active:scale-95 ${
-                  active ? 'bg-primary-600' : 'hover:bg-gray-100'
-                }`}
-              >
-                <span
-                  className={`block rounded-full ${active ? 'bg-white' : 'bg-gray-900'}`}
-                  style={{ width: dotSize, height: dotSize }}
-                />
-              </button>
-            )
-          })}
+        {/* Pen width slider — drag to choose a stroke width from {PEN_WIDTH_MIN}
+            to {PEN_WIDTH_MAX} in {PEN_WIDTH_STEP}-pixel steps. A live dot on
+            the left previews the actual stroke size; the number on the right
+            shows the current value. */}
+        <div className="flex items-center gap-2 rounded-md border border-gray-300 bg-white px-2 py-1.5">
+          <span
+            className="block shrink-0 rounded-full bg-gray-900"
+            style={{ width: Math.max(penWidth, 4), height: Math.max(penWidth, 4) }}
+            aria-hidden="true"
+          />
+          <span className="shrink-0 text-xs text-gray-500">粗细</span>
+          <input
+            type="range"
+            min={PEN_WIDTH_MIN}
+            max={PEN_WIDTH_MAX}
+            step={PEN_WIDTH_STEP}
+            value={penWidth}
+            onChange={(e) => setPenWidth(Number(e.target.value))}
+            aria-label="笔触粗细"
+            className="h-2 w-28 cursor-pointer touch-none accent-primary-600"
+          />
+          <span className="min-w-[2.25rem] shrink-0 text-right text-xs font-medium tabular-nums text-gray-700">
+            {penWidth}
+          </span>
         </div>
 
         {/* Undo / clear */}
