@@ -7,8 +7,7 @@ interface Props {
   containerSize: { width: number; height: number }
 }
 
-type DragMode = 'move' | 'resize-nw' | 'resize-ne' | 'resize-sw' | 'resize-se' |
-  'resize-n' | 'resize-s' | 'resize-w' | 'resize-e' | null
+type DragMode = 'move' | 'resize-nw' | 'resize-ne' | 'resize-sw' | 'resize-se' | null
 
 interface DragState {
   mode: NonNullable<DragMode>
@@ -116,18 +115,6 @@ export function SignatureArea({ area, containerSize }: Props) {
         case 'resize-nw':
           applyResize(start.x + dxRatio, start.y + dyRatio, start.w - dxRatio, start.h - dyRatio)
           break
-        case 'resize-n':
-          applyResize(start.x, start.y + dyRatio, start.w, start.h - dyRatio)
-          break
-        case 'resize-s':
-          applyResize(start.x, start.y, start.w, start.h + dyRatio)
-          break
-        case 'resize-w':
-          applyResize(start.x + dxRatio, start.y, start.w - dxRatio, start.h)
-          break
-        case 'resize-e':
-          applyResize(start.x, start.y, start.w + dxRatio, start.h)
-          break
       }
 
       updateSignatureArea(next)
@@ -174,7 +161,7 @@ export function SignatureArea({ area, containerSize }: Props) {
   }
 
   const handleBase =
-    'absolute h-3 w-3 rounded-sm border-2 border-white bg-primary-600 shadow-sm'
+    'absolute h-1.5 w-1.5 rounded-sm border border-white bg-primary-600 shadow-sm'
 
   return (
     <>
@@ -183,8 +170,8 @@ export function SignatureArea({ area, containerSize }: Props) {
         data-signature-area="true"
         className={`absolute touch-none ${
           isAreaSelected
-            ? 'ring-2 ring-primary-500 ring-offset-1'
-            : 'ring-1 ring-primary-400/60'
+            ? 'ring-[1.5px] ring-primary-500'
+            : 'ring-[1px] ring-primary-400/60'
         }`}
         style={{
           left: pxX,
@@ -213,17 +200,17 @@ export function SignatureArea({ area, containerSize }: Props) {
 
         {isAreaSelected && (
           <>
-            {/* Resize handles — 4 corners + 4 edges (skip top-middle 'n' to avoid
-                overlapping the floating toolbar above). */}
+            {/* Resize handles — only the 4 corners, kept small (8px) and
+                positioned fully outside the area so the area body stays a
+                clean drag-to-move surface. Edge handles were removed: they
+                ran along the entire side and made it too easy to resize
+                when the user just wanted to move the box. */}
             {(
               [
-                ['nw', 'left-0 top-0 -translate-x-1/2 -translate-y-1/2 cursor-nw-resize'],
-                ['ne', 'right-0 top-0 translate-x-1/2 -translate-y-1/2 cursor-ne-resize'],
-                ['sw', 'left-0 bottom-0 -translate-x-1/2 translate-y-1/2 cursor-sw-resize'],
-                ['se', 'right-0 bottom-0 translate-x-1/2 translate-y-1/2 cursor-se-resize'],
-                ['s', 'left-1/2 bottom-0 -translate-x-1/2 translate-y-1/2 cursor-s-resize'],
-                ['w', 'left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 cursor-w-resize'],
-                ['e', 'right-0 top-1/2 translate-x-1/2 -translate-y-1/2 cursor-e-resize'],
+                ['nw', 'left-0 top-0 -translate-x-full -translate-y-full cursor-nw-resize'],
+                ['ne', 'right-0 top-0 translate-x-full -translate-y-full cursor-ne-resize'],
+                ['sw', 'left-0 bottom-0 -translate-x-full translate-y-full cursor-sw-resize'],
+                ['se', 'right-0 bottom-0 translate-x-full translate-y-full cursor-se-resize'],
               ] as const
             ).map(([pos, classes]) => (
               <div
