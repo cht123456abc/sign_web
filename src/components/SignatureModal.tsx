@@ -1,20 +1,29 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import SignaturePad from 'signature_pad'
 import { useApp } from '../context/AppContext'
 import { useOrientation } from '../hooks/useOrientation'
-import { canvasToPngDataUrl, isCanvasBlank } from '../utils/image'
-
-interface Stroke {
-  width: number
-  points: Array<{ x: number; y: number; p: number }>
-}
-
-const PEN_COLOR = '#1a1a1a'
 
 const PEN_WIDTH_MIN = 5
 const PEN_WIDTH_MAX = 11
 const PEN_WIDTH_STEP = 1
+const PEN_COLOR = '#1a1a1a'
 
+/**
+ * Full-screen signature modal.
+ *
+ * Uses the szimek/signature_pad library which:
+ *   - interpolates each stroke as a variable-width cubic Bézier curve
+ *   - derives width from pen velocity: fast → thinner, slow → thicker
+ *   - smooths width changes via velocityFilterWeight (EMA)
+ *   - renders strokes as filled circles along the Bézier with varying radii
+ *
+ * We map our 5–11 px slider to `maxWidth` (full-width when slow) and
+ * `maxWidth * 0.5` to `minWidth` (thinner when fast) for natural variation.
+ *
+ * Undo works by snapshotting `toData()` on every `beginStroke` and restoring
+ * the previous snapshot via `fromData()` on undo.
+ */
 export function SignatureModal() {
   const {
     signatureModalOpen,
@@ -26,10 +35,10 @@ export function SignatureModal() {
   const { lockLandscape, unlock } = useOrientation()
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [strokes, setStrokes] = useState<Stroke[]>([])
-  const [penWidth, setPenWidth] = useState<number>(8) // default = 8px
-  const drawingRef = useRef<Stroke | null>(null)
-  const dprRef = useRef(1)
+  const padRef = useRef<SignaturePad | null>(null)
+  const historyRef = useRef<string[]>([])
+  const [penWidth, setPenWidth] = useState<number>(8)
+  const [hasStrokes, setHasStrokes] = useState(false)
 
   // Lock orientation and lock body scroll while modal is open.
   useEffect(() => {
@@ -44,201 +53,137 @@ export function SignatureModal() {
     }
   }, [signatureModalOpen, lockLandscape, unlock])
 
-  // Resize canvas to match its parent container's rendered size (not window
-  // size — the canvas lives inside a flex-1 region between the top and bottom
-  // bars). Observe the PARENT rather than the canvas itself: the canvas's
-  // CSS size only changes when we explicitly set style.width, so a stale
-  // initial measurement would otherwise stay forever. The parent is sized by
-  // flex layout, which always settles to its final dimensions.
+  // Instantiate SignaturePad when the modal opens. The instance is recreated
+  // (not just reconfigured) on each open so it always attaches to a fresh
+  // canvas with no stale state.
+  useEffect(() => {
+    if (!signatureModalOpen) return
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const pad = new SignaturePad(canvas, {
+      minWidth: penWidth * 0.5,
+      maxWidth: penWidth,
+      penColor: PEN_COLOR,
+      velocityFilterWeight: 0.7,
+      throttle: 16,
+      minDistance: 0,
+      backgroundColor: 'rgba(0,0,0,0)', // transparent so PDF shows through
+    })
+    padRef.current = pad
+    historyRef.current = []
+    setHasStrokes(false)
+
+    // Snapshot the data BEFORE each stroke so undo can restore the state
+    // immediately before that stroke was drawn.
+    const onBeginStroke = () => {
+      historyRef.current = [...historyRef.current, JSON.stringify(pad.toData())]
+    }
+    const onEndStroke = () => setHasStrokes(true)
+    pad.addEventListener('beginStroke', onBeginStroke)
+    pad.addEventListener('endStroke', onEndStroke)
+
+    return () => {
+      pad.removeEventListener('beginStroke', onBeginStroke)
+      pad.removeEventListener('endStroke', onEndStroke)
+      pad.off()
+      padRef.current = null
+    }
+    // penWidth is intentionally NOT a dep — width updates are handled by the
+    // dedicated effect below, and we don't want to recreate the pad on every
+    // slider nudge.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signatureModalOpen])
+
+  // Live-update penWidth on slider changes without recreating the pad.
+  useEffect(() => {
+    const pad = padRef.current
+    if (!pad) return
+    pad.minWidth = penWidth * 0.5
+    pad.maxWidth = penWidth
+  }, [penWidth])
+
+  // Resize canvas to fill its parent container. Observe the PARENT (not the
+  // canvas) so flex layout settles correctly. Preserve existing strokes
+  // across resize via toData / fromData.
   useEffect(() => {
     if (!signatureModalOpen) return
     const canvas = canvasRef.current
     const parent = canvas?.parentElement
     if (!canvas || !parent) return
 
-    const sync = () => {
+    const resize = () => {
+      const ratio = Math.max(window.devicePixelRatio || 1, 1)
       const rect = parent.getBoundingClientRect()
       if (rect.width <= 0 || rect.height <= 0) return
 
-      const dpr = window.devicePixelRatio || 1
-      dprRef.current = dpr
+      // Save existing strokes before we touch the canvas dimensions (which
+      // also clears it).
+      const data = padRef.current?.toData()
 
-      const cssW = Math.round(rect.width)
-      const cssH = Math.round(rect.height)
-      const targetW = Math.floor(cssW * dpr)
-      const targetH = Math.floor(cssH * dpr)
-
-      // Set BOTH the drawing buffer size (canvas.width/height) and the CSS
-      // display size (style.width/height). Without style.width, the canvas's
-      // intrinsic size (the drawing buffer) is used as its CSS size, which on
-      // retina displays makes the canvas 2x too big.
-      if (canvas.width !== targetW || canvas.height !== targetH) {
-        canvas.width = targetW
-        canvas.height = targetH
-      }
-      canvas.style.width = `${cssW}px`
-      canvas.style.height = `${cssH}px`
+      canvas.width = Math.floor(rect.width * ratio)
+      canvas.height = Math.floor(rect.height * ratio)
+      canvas.style.width = `${Math.round(rect.width)}px`
+      canvas.style.height = `${Math.round(rect.height)}px`
 
       const ctx = canvas.getContext('2d')
-      if (!ctx) return
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      ctx?.setTransform(ratio, 0, 0, ratio, 0, 0)
 
-      // Clear the canvas (transparent — keep alpha=0 so the exported PNG
-      // has no white background and the underlying PDF shows through).
-      ctx.clearRect(0, 0, cssW, cssH)
-      for (const s of strokes) drawStroke(ctx, s)
-      // Also redraw the in-progress stroke (held only in drawingRef, not yet
-      // committed to state) so a resize-triggered sync doesn't make it
-      // flicker / disappear mid-gesture.
-      const drawing = drawingRef.current
-      if (drawing && drawing.points.length >= 2) {
-        drawStroke(ctx, drawing)
+      // Restore the strokes into the freshly-sized canvas.
+      if (data && padRef.current) {
+        padRef.current.fromData(data)
       }
     }
 
-    // Defer the first sync by one frame so flex layout has settled, and run
-    // a second sync after a short delay in case orientation lock re-triggers
-    // layout asynchronously.
-    const raf1 = requestAnimationFrame(sync)
-    const raf2 = requestAnimationFrame(() => requestAnimationFrame(sync))
-    const timeoutId = window.setTimeout(sync, 250)
+    const raf1 = requestAnimationFrame(resize)
+    const raf2 = requestAnimationFrame(() => requestAnimationFrame(resize))
+    const timeoutId = window.setTimeout(resize, 250)
 
-    const ro = new ResizeObserver(sync)
+    const ro = new ResizeObserver(resize)
     ro.observe(parent)
-    window.addEventListener('orientationchange', sync)
-    window.addEventListener('resize', sync)
+    window.addEventListener('orientationchange', resize)
+    window.addEventListener('resize', resize)
 
     return () => {
       cancelAnimationFrame(raf1)
       cancelAnimationFrame(raf2)
       window.clearTimeout(timeoutId)
       ro.disconnect()
-      window.removeEventListener('orientationchange', sync)
-      window.removeEventListener('resize', sync)
+      window.removeEventListener('orientationchange', resize)
+      window.removeEventListener('resize', resize)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signatureModalOpen, strokes.length])
-
-  const drawStroke = useCallback((ctx: CanvasRenderingContext2D, stroke: Stroke) => {
-    if (stroke.points.length < 2) return
-    ctx.strokeStyle = PEN_COLOR
-    ctx.lineWidth = stroke.width
-    ctx.lineCap = 'round'
-    ctx.lineJoin = 'round'
-    ctx.beginPath()
-    const first = stroke.points[0]
-    ctx.moveTo(first.x, first.y)
-    for (let i = 1; i < stroke.points.length; i++) {
-      const pt = stroke.points[i]
-      ctx.lineTo(pt.x, pt.y)
-    }
-    ctx.stroke()
-  }, [])
-
-  /** Convert a pointer event to canvas-local CSS pixel coords. */
-  const toCanvasLocal = (e: React.PointerEvent | PointerEvent): { x: number; y: number; p: number } => {
-    const canvas = canvasRef.current
-    const rect = canvas?.getBoundingClientRect()
-    return {
-      x: rect ? e.clientX - rect.left : e.clientX,
-      y: rect ? e.clientY - rect.top : e.clientY,
-      p: ('pressure' in e ? e.pressure : 0.5) || 0.5,
-    }
-  }
-
-  const onPointerDown = (e: React.PointerEvent) => {
-    e.preventDefault()
-    const canvas = canvasRef.current
-    if (!canvas) return
-    canvas.setPointerCapture(e.pointerId)
-    const pt = toCanvasLocal(e)
-    drawingRef.current = { width: penWidth, points: [pt] }
-  }
-
-  const onPointerMove = (e: React.PointerEvent) => {
-    const drawing = drawingRef.current
-    if (!drawing) return
-    const pt = toCanvasLocal(e)
-    drawing.points.push(pt)
-
-    const ctx = canvasRef.current?.getContext('2d')
-    if (!ctx) return
-    // Draw just the new segment for performance.
-    if (drawing.points.length >= 2) {
-      const a = drawing.points[drawing.points.length - 2]
-      const b = drawing.points[drawing.points.length - 1]
-      ctx.strokeStyle = PEN_COLOR
-      ctx.lineWidth = drawing.width
-      ctx.lineCap = 'round'
-      ctx.lineJoin = 'round'
-      ctx.beginPath()
-      ctx.moveTo(a.x, a.y)
-      ctx.lineTo(b.x, b.y)
-      ctx.stroke()
-    }
-  }
-
-  const onPointerUp = (e: React.PointerEvent) => {
-    const drawing = drawingRef.current
-    if (!drawing) return
-    drawingRef.current = null
-    try {
-      canvasRef.current?.releasePointerCapture(e.pointerId)
-    } catch {
-      /* ignore */
-    }
-    if (drawing.points.length > 1) {
-      setStrokes((prev) => [...prev, drawing])
-    }
-  }
+  }, [signatureModalOpen])
 
   const onUndo = () => {
-    setStrokes((prev) => {
-      if (prev.length === 0) return prev
-      const next = prev.slice(0, -1)
-      const canvas = canvasRef.current
-      const ctx = canvas?.getContext('2d')
-      if (!ctx || !canvas) return next
-      const rect = canvas.getBoundingClientRect()
-      ctx.setTransform(dprRef.current, 0, 0, dprRef.current, 0, 0)
-      ctx.clearRect(0, 0, rect.width, rect.height)
-      for (const s of next) drawStroke(ctx, s)
-      return next
-    })
+    const pad = padRef.current
+    if (!pad) return
+    const history = historyRef.current
+    if (history.length === 0) return
+    const prevData = history[history.length - 1]
+    historyRef.current = history.slice(0, -1)
+    pad.fromData(JSON.parse(prevData))
+    setHasStrokes(!pad.isEmpty())
   }
 
   const onClear = () => {
-    setStrokes([])
-    const canvas = canvasRef.current
-    const ctx = canvas?.getContext('2d')
-    if (!ctx || !canvas) return
-    const rect = canvas.getBoundingClientRect()
-    ctx.setTransform(dprRef.current, 0, 0, dprRef.current, 0, 0)
-    ctx.clearRect(0, 0, rect.width, rect.height)
+    padRef.current?.clear()
+    historyRef.current = []
+    setHasStrokes(false)
   }
 
   const onClose = () => {
     closeSignatureModal()
-    setStrokes([])
-    const canvas = canvasRef.current
-    const ctx = canvas?.getContext('2d')
-    if (ctx && canvas) {
-      const rect = canvas.getBoundingClientRect()
-      ctx.setTransform(dprRef.current, 0, 0, dprRef.current, 0, 0)
-      ctx.clearRect(0, 0, rect.width, rect.height)
-    }
   }
 
-  const onConfirm = async () => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    if (!signingAreaId) return
-    if (isCanvasBlank(canvas)) {
+  const onConfirm = () => {
+    const pad = padRef.current
+    if (!pad || !signingAreaId) return
+    if (pad.isEmpty()) {
       showToast('请先签名', 'error')
       return
     }
     try {
-      const dataUrl = await canvasToPngDataUrl(canvas)
+      const dataUrl = pad.toDataURL('image/png')
       setAreaSignatureImage(signingAreaId, dataUrl)
       onClose()
     } catch (e) {
@@ -277,16 +222,11 @@ export function SignatureModal() {
         </button>
       </div>
 
-      {/* Canvas — fills the remaining viewport space between top/bottom bars. */}
+      {/* Canvas — fills the remaining viewport space between top/bottom bars.
+          SignaturePad attaches its own pointer listeners, so no React handlers
+          are needed here. */}
       <div className="relative flex-1 bg-white">
-        <canvas
-          ref={canvasRef}
-          className="absolute inset-0 block touch-none"
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-        />
+        <canvas ref={canvasRef} className="absolute inset-0 block" />
       </div>
 
       {/* Bottom toolbar — pen width + undo/clear */}
@@ -295,9 +235,9 @@ export function SignatureModal() {
         style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 0.5rem)' }}
       >
         {/* Pen width slider — drag to choose a stroke width from {PEN_WIDTH_MIN}
-            to {PEN_WIDTH_MAX} in {PEN_WIDTH_STEP}-pixel steps. The track
-            fills with primary color up to the thumb. The frame width is
-            fixed: no item inside changes size with the value. */}
+            to {PEN_WIDTH_MAX} in {PEN_WIDTH_STEP}-pixel steps. SignaturePad
+            will modulate between minWidth (= penWidth * 0.5) and maxWidth
+            (= penWidth) based on pen velocity. */}
         <div className="flex items-center gap-2.5 rounded-full border border-gray-200 bg-gray-50 py-1.5 pl-3 pr-3 shadow-sm">
           <span className="select-none text-[11px] font-medium uppercase tracking-wide text-gray-400">
             细
@@ -331,7 +271,7 @@ export function SignatureModal() {
           <button
             type="button"
             onClick={onUndo}
-            disabled={strokes.length === 0}
+            disabled={!hasStrokes}
             className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
           >
             撤销
@@ -339,7 +279,7 @@ export function SignatureModal() {
           <button
             type="button"
             onClick={onClear}
-            disabled={strokes.length === 0}
+            disabled={!hasStrokes}
             className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
           >
             清空
