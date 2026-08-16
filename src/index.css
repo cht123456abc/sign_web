@@ -55,34 +55,59 @@ html.body-locked body {
   height: 100%;
 }
 
-/* Pen-width slider — give the thumb a bigger, mobile-friendly hit area. */
-input[type='range']::-webkit-slider-thumb {
+/* Pen-width slider — track is transparent so the linear-gradient on the
+   <input> shows through (giving the filled / unfilled effect). Thumb is a
+   22px circle with a white ring and soft shadow for a polished look. */
+.pen-width-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  background-clip: content-box;
+}
+.pen-width-slider::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 9999px;
+  background: transparent;
+}
+.pen-width-slider::-moz-range-track {
+  height: 8px;
+  border-radius: 9999px;
+  background: transparent;
+}
+.pen-width-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   width: 22px;
   height: 22px;
+  margin-top: -7px; /* centers the 22px thumb on the 8px track */
   border-radius: 9999px;
   background: theme('colors.primary.600');
+  border: 3px solid white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2),
+    0 0 0 1px rgba(0, 0, 0, 0.04);
   cursor: pointer;
-  border: 2px solid white;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  transition: transform 0.1s ease;
 }
-input[type='range']::-moz-range-thumb {
+.pen-width-slider::-webkit-slider-thumb:active {
+  transform: scale(1.15);
+}
+.pen-width-slider::-moz-range-thumb {
   width: 22px;
   height: 22px;
   border-radius: 9999px;
   background: theme('colors.primary.600');
+  border: 3px solid white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2),
+    0 0 0 1px rgba(0, 0, 0, 0.04);
   cursor: pointer;
-  border: 2px solid white;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  transition: transform 0.1s ease;
 }
-input[type='range']::-webkit-slider-runnable-track {
-  height: 4px;
-  border-radius: 9999px;
-  background: theme('colors.gray.200');
+.pen-width-slider::-moz-range-thumb:active {
+  transform: scale(1.15);
 }
-input[type='range']::-moz-range-track {
-  height: 4px;
-  border-radius: 9999px;
-  background: theme('colors.gray.200');
+.pen-width-slider:focus {
+  outline: none;
+}
+.pen-width-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.25),
+    0 1px 3px rgba(0, 0, 0, 0.2);
 }

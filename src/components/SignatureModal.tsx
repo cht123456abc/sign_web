@@ -27,7 +27,7 @@ export function SignatureModal() {
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [strokes, setStrokes] = useState<Stroke[]>([])
-  const [penWidth, setPenWidth] = useState<number>(7) // default = 3rd level
+  const [penWidth, setPenWidth] = useState<number>(8) // default = 8px
   const drawingRef = useRef<Stroke | null>(null)
   const dprRef = useRef(1)
 
@@ -247,6 +247,10 @@ export function SignatureModal() {
     }
   }
 
+  // Filled portion of the pen-width slider track (0–100%).
+  const fillPercent =
+    ((penWidth - PEN_WIDTH_MIN) / (PEN_WIDTH_MAX - PEN_WIDTH_MIN)) * 100
+
   if (!signatureModalOpen) return null
 
   return createPortal(
@@ -291,16 +295,14 @@ export function SignatureModal() {
         style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 0.5rem)' }}
       >
         {/* Pen width slider — drag to choose a stroke width from {PEN_WIDTH_MIN}
-            to {PEN_WIDTH_MAX} in {PEN_WIDTH_STEP}-pixel steps. A live dot on
-            the left previews the actual stroke size; the number on the right
-            shows the current value. */}
-        <div className="flex items-center gap-2 rounded-md border border-gray-300 bg-white px-2 py-1.5">
-          <span
-            className="block shrink-0 rounded-full bg-gray-900"
-            style={{ width: Math.max(penWidth, 4), height: Math.max(penWidth, 4) }}
-            aria-hidden="true"
-          />
-          <span className="shrink-0 text-xs text-gray-500">粗细</span>
+            to {PEN_WIDTH_MAX} in {PEN_WIDTH_STEP}-pixel steps. The track
+            fills with primary color up to the thumb. The frame width is
+            fixed: no item inside changes size with the value. */}
+        <div className="flex items-center gap-2.5 rounded-full border border-gray-200 bg-gray-50 py-1.5 pl-3 pr-3 shadow-sm">
+          <span className="select-none text-[11px] font-medium uppercase tracking-wide text-gray-400">
+            细
+          </span>
+
           <input
             type="range"
             min={PEN_WIDTH_MIN}
@@ -309,10 +311,18 @@ export function SignatureModal() {
             value={penWidth}
             onChange={(e) => setPenWidth(Number(e.target.value))}
             aria-label="笔触粗细"
-            className="h-2 w-28 cursor-pointer touch-none accent-primary-600"
+            className="pen-width-slider h-3 w-32 shrink-0 cursor-pointer touch-none"
+            style={{
+              background: `linear-gradient(to right,
+                rgb(37 99 235) 0%,
+                rgb(37 99 235) ${fillPercent}%,
+                rgb(229 231 235) ${fillPercent}%,
+                rgb(229 231 235) 100%)`,
+            }}
           />
-          <span className="min-w-[2.25rem] shrink-0 text-right text-xs font-medium tabular-nums text-gray-700">
-            {penWidth}
+
+          <span className="select-none text-[11px] font-medium uppercase tracking-wide text-gray-400">
+            粗
           </span>
         </div>
 
