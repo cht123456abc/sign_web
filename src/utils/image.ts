@@ -27,17 +27,16 @@ export function canvasToPngDataUrl(canvas: HTMLCanvasElement): Promise<string> {
   })
 }
 
-/** Whether the dataURL has any non-transparent pixels (i.e. user actually drew something). */
+/** Whether the canvas has any non-transparent pixels (i.e. user actually drew something). */
 export function isCanvasBlank(canvas: HTMLCanvasElement): boolean {
   const ctx = canvas.getContext('2d')
   if (!ctx) return true
   const { width, height } = canvas
-  // Sample the center region only for performance.
-  const sampleW = Math.min(width, 200)
-  const sampleH = Math.min(height, 200)
-  const x0 = Math.floor((width - sampleW) / 2)
-  const y0 = Math.floor((height - sampleH) / 2)
-  const data = ctx.getImageData(x0, y0, sampleW, sampleH).data
+  if (width === 0 || height === 0) return true
+  // Scan the ENTIRE canvas — users can draw anywhere, including the
+  // leftmost edge. A previous center-200x200 sampling optimization made
+  // edge strokes silently fail the blank check.
+  const data = ctx.getImageData(0, 0, width, height).data
   for (let i = 3; i < data.length; i += 4) {
     if (data[i] !== 0) return false
   }
