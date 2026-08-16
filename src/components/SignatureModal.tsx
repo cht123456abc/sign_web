@@ -12,9 +12,11 @@ interface Stroke {
 const PEN_COLOR = '#1a1a1a'
 
 const PEN_WIDTHS = [
-  { value: 2, label: '细' },
-  { value: 4, label: '中' },
-  { value: 7, label: '粗' },
+  { value: 2 },
+  { value: 4 },
+  { value: 7 },
+  { value: 11 },
+  { value: 16 },
 ] as const
 
 export function SignatureModal() {
@@ -286,23 +288,29 @@ export function SignatureModal() {
         className="flex shrink-0 items-center justify-between gap-3 border-t border-gray-200 bg-white px-4 pt-2"
         style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 0.5rem)' }}
       >
-        {/* Pen width selector */}
+        {/* Pen width selector — buttons show a black dot whose size scales with
+            the actual stroke width (clamped to a 3px minimum so the smallest
+            option is still visible). */}
         <div className="flex items-center gap-1 rounded-md border border-gray-300 bg-white p-1">
           {PEN_WIDTHS.map((opt) => {
             const active = penWidth === opt.value
+            const dotSize = Math.max(opt.value, 3)
             return (
               <button
                 key={opt.value}
                 type="button"
                 onClick={() => setPenWidth(opt.value)}
                 aria-pressed={active}
-                className={`flex h-8 w-10 items-center justify-center rounded text-xs font-medium transition active:scale-95 ${
-                  active
-                    ? 'bg-primary-600 text-white'
-                    : 'text-gray-600 hover:bg-gray-100'
+                aria-label={`${opt.value} 像素`}
+                title={`${opt.value}px`}
+                className={`flex h-9 w-9 items-center justify-center rounded transition active:scale-95 ${
+                  active ? 'bg-primary-600' : 'hover:bg-gray-100'
                 }`}
               >
-                {opt.label}
+                <span
+                  className={`block rounded-full ${active ? 'bg-white' : 'bg-gray-900'}`}
+                  style={{ width: dotSize, height: dotSize }}
+                />
               </button>
             )
           })}
