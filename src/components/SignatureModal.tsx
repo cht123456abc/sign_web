@@ -5,11 +5,17 @@ import { useOrientation } from '../hooks/useOrientation'
 import { canvasToPngDataUrl, isCanvasBlank } from '../utils/image'
 
 interface Stroke {
+  width: number
   points: Array<{ x: number; y: number; p: number }>
 }
 
 const PEN_COLOR = '#1a1a1a'
-const PEN_WIDTH = 3
+
+const PEN_WIDTHS = [
+  { value: 2, label: '细' },
+  { value: 4, label: '中' },
+  { value: 7, label: '粗' },
+] as const
 
 export function SignatureModal() {
   const { signatureModalOpen, closeSignatureModal, setSignatureImage, showToast } =
@@ -18,6 +24,7 @@ export function SignatureModal() {
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [strokes, setStrokes] = useState<Stroke[]>([])
+  const [penWidth, setPenWidth] = useState<number>(4) // default medium
   const drawingRef = useRef<Stroke | null>(null)
   const dprRef = useRef(1)
 
@@ -77,6 +84,13 @@ export function SignatureModal() {
       // has no white background and the underlying PDF shows through).
       ctx.clearRect(0, 0, cssW, cssH)
       for (const s of strokes) drawStroke(ctx, s)
+      // Also redraw the in-progress stroke (held only in drawingRef, not yet
+      // committed to state) so a resize-triggered sync doesn't make it
+      // flicker / disappear mid-gesture.
+      const drawing = drawingRef.current
+      if (drawing && drawing.points.length >= 2) {
+        drawStroke(ctx, drawing)
+      }
     }
 
     // Defer the first sync by one frame so flex layout has settled, and run
@@ -105,7 +119,7 @@ export function SignatureModal() {
   const drawStroke = useCallback((ctx: CanvasRenderingContext2D, stroke: Stroke) => {
     if (stroke.points.length < 2) return
     ctx.strokeStyle = PEN_COLOR
-    ctx.lineWidth = PEN_WIDTH
+    ctx.lineWidth = stroke.width
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
     ctx.beginPath()
@@ -135,7 +149,7 @@ export function SignatureModal() {
     if (!canvas) return
     canvas.setPointerCapture(e.pointerId)
     const pt = toCanvasLocal(e)
-    drawingRef.current = { points: [pt] }
+    drawingRef.current = { width: penWidth, points: [pt] }
   }
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -151,7 +165,7 @@ export function SignatureModal() {
       const a = drawing.points[drawing.points.length - 2]
       const b = drawing.points[drawing.points.length - 1]
       ctx.strokeStyle = PEN_COLOR
-      ctx.lineWidth = PEN_WIDTH
+      ctx.lineWidth = drawing.width
       ctx.lineCap = 'round'
       ctx.lineJoin = 'round'
       ctx.beginPath()
@@ -267,27 +281,52 @@ export function SignatureModal() {
         />
       </div>
 
-      {/* Bottom toolbar — undo/clear */}
+      {/* Bottom toolbar — pen width + undo/clear */}
       <div
-        className="flex shrink-0 items-center justify-center gap-3 border-t border-gray-200 bg-white px-4 pt-2"
+        className="flex shrink-0 items-center justify-between gap-3 border-t border-gray-200 bg-white px-4 pt-2"
         style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 0.5rem)' }}
       >
-        <button
-          type="button"
-          onClick={onUndo}
-          disabled={strokes.length === 0}
-          className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          撤销
-        </button>
-        <button
-          type="button"
-          onClick={onClear}
-          disabled={strokes.length === 0}
-          className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          清空
-        </button>
+        {/* Pen width selector */}
+        <div className="flex items-center gap-1 rounded-md border border-gray-300 bg-white p-1">
+          {PEN_WIDTHS.map((opt) => {
+            const active = penWidth === opt.value
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setPenWidth(opt.value)}
+                aria-pressed={active}
+                className={`flex h-8 w-10 items-center justify-center rounded text-xs font-medium transition active:scale-95 ${
+                  active
+                    ? 'bg-primary-600 text-white'
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                {opt.label}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* Undo / clear */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onUndo}
+            disabled={strokes.length === 0}
+            className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            撤销
+          </button>
+          <button
+            type="button"
+            onClick={onClear}
+            disabled={strokes.length === 0}
+            className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            清空
+          </button>
+        </div>
       </div>
     </div>,
     document.body
